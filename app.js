@@ -1,760 +1,112 @@
-'use strict';
-
-/* =========================================
-   HARMERB LANDING PAGE — CLEAN APP.JS
-========================================= */
-
-(() => {
-  const doc = document;
-  const html = doc.documentElement;
-  const body = doc.body;
-
-  const $ = (selector, scope = doc) => scope.querySelector(selector);
-  const $$ = (selector, scope = doc) => [...scope.querySelectorAll(selector)];
-
-  const state = {
-    reducedMotion: window.matchMedia('(prefers-reduced-motion: reduce)').matches,
-    isTouch: window.matchMedia('(hover: none)').matches,
-    isMobile: window.innerWidth <= 768,
-    theme: 'dark'
-  };
-
-  const rafTasks = new Set();
-  let rafId = null;
-
-  const runRAF = (time) => {
-    rafTasks.forEach(fn => fn(time));
-    rafId = rafTasks.size ? requestAnimationFrame(runRAF) : null;
-  };
-
-  const addRAFTask = (fn) => {
-    rafTasks.add(fn);
-    if (!rafId) rafId = requestAnimationFrame(runRAF);
-  };
-
-  const removeRAFTask = (fn) => {
-    rafTasks.delete(fn);
-    if (!rafTasks.size && rafId) {
-      cancelAnimationFrame(rafId);
-      rafId = null;
-    }
-  };
-
-  const onResizeFlags = () => {
-    state.isMobile = window.innerWidth <= 768;
-  };
-
-  window.addEventListener('resize', onResizeFlags, { passive: true });
-
-  /* =========================================
-     THEME
-  ========================================= */
-  (() => {
-    const KEY = 'harmber-theme';
-    const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-    const initial = localStorage.getItem(KEY) || (prefersDark ? 'dark' : 'light');
-
-    const syncIcons = (theme) => {
-      $$('.theme-toggle, .theme-toggle-mob').forEach(btn => {
-        const moon = $('.icon-moon', btn);
-        const sun = $('.icon-sun', btn);
-        if (moon) moon.style.display = theme === 'dark' ? 'block' : 'none';
-        if (sun) sun.style.display = theme === 'light' ? 'block' : 'none';
-      });
-    };
-
-    const applyTheme = (theme) => {
-      state.theme = theme;
-      html.setAttribute('data-theme', theme);
-      localStorage.setItem(KEY, theme);
-
-      const meta = $('meta[name="theme-color"]');
-      if (meta) meta.content = theme === 'dark' ? '#000000' : '#f6f6f8';
-
-      syncIcons(theme);
-    };
-
-    applyTheme(initial);
-
-    $$('#themeToggle, #themeToggleMob').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const next = state.theme === 'dark' ? 'light' : 'dark';
-        applyTheme(next);
-        spawnSparksFromElement(btn, 7);
-      });
-    });
-  })();
-
-  /* =========================================
-     CURSOR + SPOTLIGHT
-  ========================================= */
-  (() => {
-    const dot = $('#cursorDot');
-    const ring = $('#cursorRing');
-
-    if (!dot || !ring || state.isTouch) return;
-
-    let mx = window.innerWidth / 2;
-    let my = window.innerHeight / 2;
-    let rx = mx;
-    let ry = my;
-
-    const updateCursor = () => {
-      rx += (mx - rx) * 0.13;
-      ry += (my - ry) * 0.13;
-      ring.style.left = `${rx}px`;
-      ring.style.top = `${ry}px`;
-    };
-
-    doc.addEventListener('mousemove', (e) => {
-      mx = e.clientX;
-      my = e.clientY;
-      dot.style.left = `${mx}px`;
-      dot.style.top = `${my}px`;
-      body.style.setProperty('--cx', `${mx}px`);
-      body.style.setProperty('--cy', `${my}px`);
-    });
-
-    doc.addEventListener('mouseleave', () => {
-      dot.style.opacity = '0';
-      ring.style.opacity = '0';
-    });
-
-    doc.addEventListener('mouseenter', () => {
-      dot.style.opacity = '1';
-      ring.style.opacity = '1';
-    });
-
-    addRAFTask(updateCursor);
-
-    $$('a, button, .feat-row, .scr-item, .dl-card').forEach(el => {
-      el.addEventListener('mouseenter', () => ring.classList.add('hover'));
-      el.addEventListener('mouseleave', () => ring.classList.remove('hover'));
-    });
-  })();
-
-  /* =========================================
-     PROGRESS BAR + NAV
-  ========================================= */
-  (() => {
-    const bar = $('#progressBar');
-    const nav = $('#nav');
-    if (!bar && !nav) return;
-
-    let ticking = false;
-
-    const getBannerH = () => {
-      const banner = doc.getElementById('app-banner');
-      if (!banner || banner.classList.contains('banner-hidden')) return 0;
-      return banner.offsetHeight;
-    };
-
-    const update = () => {
-      const scrollY = window.scrollY;
-      const maxScroll = doc.documentElement.scrollHeight - window.innerHeight;
-      const progress = maxScroll > 0 ? (scrollY / maxScroll) * 100 : 0;
-
-      if (bar) bar.style.width = `${progress}%`;
-
-      if (nav) {
-        nav.classList.toggle('scrolled', scrollY > 30);
-        // Slide nav up with the banner as user scrolls — once banner is gone, lock to top:0
-        const bannerH = getBannerH();
-        const navTop = Math.max(0, bannerH - scrollY);
-        nav.style.top = `${navTop}px`;
-      }
-
-      ticking = false;
-    };
-
-    window.addEventListener('scroll', () => {
-      if (ticking) return;
-      ticking = true;
-      requestAnimationFrame(update);
-    }, { passive: true });
-
-    // Re-run on resize (banner height can change on narrow screens)
-    window.addEventListener('resize', update, { passive: true });
-
-      update();
-  })();
-
-  /* =========================================
-     HERO 3D CINEMATIC SCROLL PARALLAX
-  ========================================= */
-  (() => {
-    if (state.reducedMotion) return;
-
-    const hero       = $('#hero');
-    const phones     = hero ? hero.querySelector('.hero-phones') : null;
-    const heroContent = hero ? hero.querySelector('.hero-content') : null;
-
-    if (!hero || !phones) return;
-
-    let lastSY = 0;
-    let rafScheduled = false;
-
-    const updateParallax = () => {
-      rafScheduled = false;
-      const sy   = window.scrollY;
-      const heroH = hero.offsetHeight;
-      if (sy > heroH) return; // past hero, stop
-
-      // 0 → 1 as user scrolls through hero
-      const progress = Math.min(sy / (heroH * 0.7), 1);
-
-      // Phones: tilt back, scale down, fade subtly
-      const rotX  = progress * 28;          // deg
-      const scale = 1 - progress * 0.12;    // 1 → 0.88
-      const fadeP = 1 - progress * 0.45;    // 1 → 0.55
-
-      phones.style.transform = `perspective(1100px) rotateX(${rotX}deg) scale(${scale})`;
-      phones.style.opacity   = fadeP;
-
-      // Content: drift up, fade
-      if (heroContent) {
-        const driftY = progress * -30;
-        const fadeC  = 1 - progress * 0.6;
-        heroContent.style.transform = `translateY(${driftY}px)`;
-        heroContent.style.opacity   = Math.max(fadeC, 0);
-      }
-    };
-
-    const onScroll = () => {
-      lastSY = window.scrollY;
-      if (!rafScheduled) {
-        rafScheduled = true;
-        requestAnimationFrame(updateParallax);
-      }
-    };
-
-    window.addEventListener('scroll', onScroll, { passive: true });
-  })();
-
-  /* =========================================
-     MOBILE DRAWER
-  ========================================= */
-  (() => {
-    const btn = $('#hamburger');
-    const drawer = $('#mobileDrawer');
-    const nav = $('#nav');
-    if (!btn || !drawer || !nav) return;
-
-    const openDrawer = () => {
-      btn.classList.add('open');
-      btn.setAttribute('aria-expanded', 'true');
-      drawer.classList.add('open');
-      drawer.setAttribute('aria-hidden', 'false');
-      body.style.overflow = 'hidden';
-    };
-
-    const closeDrawer = () => {
-      btn.classList.remove('open');
-      btn.setAttribute('aria-expanded', 'false');
-      drawer.classList.remove('open');
-      drawer.setAttribute('aria-hidden', 'true');
-      body.style.overflow = '';
-    };
-
-    btn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      drawer.classList.contains('open') ? closeDrawer() : openDrawer();
-    });
-
-    $$('.drawer-link, .drawer-cta', drawer).forEach(el => {
-      el.addEventListener('click', closeDrawer);
-    });
-
-    doc.addEventListener('click', (e) => {
-      if (!nav.contains(e.target)) closeDrawer();
-    });
-
-    doc.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape') closeDrawer();
-    });
-
-    window.addEventListener('resize', () => {
-      if (window.innerWidth > 768) closeDrawer();
-    }, { passive: true });
-  })();
-
-  /* =========================================
-     REVEAL OBSERVERS
-  ========================================= */
-  (() => {
-    const revealItems = $$('.reveal');
-    if (!revealItems.length) return;
-
-    const observer = new IntersectionObserver((entries, obs) => {
-      entries.forEach(entry => {
-        if (!entry.isIntersecting) return;
-        const delay = parseInt(entry.target.dataset.delay || '0', 10);
-        window.setTimeout(() => entry.target.classList.add('in'), delay);
-        obs.unobserve(entry.target);
-      });
-    }, { threshold: 0.08 });
-
-    revealItems.forEach(el => observer.observe(el));
-  })();
-
-  (() => {
-    const items = $$('.scr-item');
-    if (!items.length) return;
-
-    const observer = new IntersectionObserver((entries, obs) => {
-      entries.forEach(entry => {
-        if (!entry.isIntersecting) return;
-        const index = items.indexOf(entry.target);
-        window.setTimeout(() => entry.target.classList.add('in'), index * 90);
-        obs.unobserve(entry.target);
-      });
-    }, { threshold: 0.12 });
-
-    items.forEach(el => observer.observe(el));
-  })();
-
-  /* =========================================
-     STATS COUNTER
-  ========================================= */
-  (() => {
-    const counters = $$('.sn[data-target]');
-    if (!counters.length) return;
-
-    const easeOut = t => 1 - Math.pow(1 - t, 3);
-
-    const observer = new IntersectionObserver((entries, obs) => {
-      entries.forEach(entry => {
-        if (!entry.isIntersecting) return;
-
-        const el = entry.target;
-        const target = parseFloat(el.dataset.target);
-        if (Number.isNaN(target)) return;
-
-        const start = performance.now();
-
-        const animate = (now) => {
-          const t = Math.min((now - start) / 1600, 1);
-          el.textContent = Math.round(easeOut(t) * target);
-          if (t < 1) requestAnimationFrame(animate);
-        };
-
-        requestAnimationFrame(animate);
-        obs.unobserve(el);
-      });
-    }, { threshold: 0.5 });
-
-    counters.forEach(el => observer.observe(el));
-  })();
-
-  /* =========================================
-     CANVAS HELPERS
-  ========================================= */
-  const createCanvasController = (canvas, drawFrame) => {
-    if (!canvas || state.reducedMotion || state.isMobile) return null;
-
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return null;
-
-    let width = 0;
-    let height = 0;
-
-    const resize = () => {
-      width = canvas.width = canvas.offsetWidth || window.innerWidth;
-      height = canvas.height = canvas.offsetHeight || window.innerHeight;
-    };
-
-    const loop = () => drawFrame({ ctx, width, height });
-
-    resize();
-    window.addEventListener('resize', resize, { passive: true });
-    addRAFTask(loop);
-
-    return { resize, destroy: () => removeRAFTask(loop) };
-  };
-
-  /* =========================================
-     WAVE CANVAS
-  ========================================= */
-  (() => {
-    const canvas = $('#waveCanvas');
-    if (!canvas) return;
-
-    const waves = [
-      { a: 50, f: 0.009, s: 0.01, p: 0.0 },
-      { a: 35, f: 0.015, s: 0.016, p: 2.3 },
-      { a: 65, f: 0.006, s: 0.006, p: 1.0 },
-      { a: 22, f: 0.024, s: 0.02, p: 3.7 }
-    ];
-    const alphas = [0.05, 0.034, 0.02, 0.024];
-
-    createCanvasController(canvas, ({ ctx, width, height }) => {
-      const base = state.theme === 'dark' ? '255,255,255' : '0,0,0';
-      ctx.clearRect(0, 0, width, height);
-
-      waves.forEach((wave, i) => {
-        wave.p += wave.s;
-        ctx.beginPath();
-        ctx.moveTo(0, height * 0.58);
-
-        for (let x = 0; x <= width; x += 3) {
-          ctx.lineTo(x, height * 0.58 + Math.sin(x * wave.f + wave.p) * wave.a);
-        }
-
-        ctx.lineTo(width, height);
-        ctx.lineTo(0, height);
-        ctx.closePath();
-        ctx.fillStyle = `rgba(${base},${alphas[i]})`;
-        ctx.fill();
-      });
-    });
-  })();
-
-  /* =========================================
-     VISUALIZER CANVAS
-  ========================================= */
-  (() => {
-    const canvas = $('#vizCanvas');
-    if (!canvas) return;
-
-    const bars = Array.from({ length: 80 }, () => ({
-      h: 10 + Math.random() * 40,
-      speed: 0.018 + Math.random() * 0.035,
-      phase: Math.random() * Math.PI * 2
-    }));
-
-    createCanvasController(canvas, ({ ctx, width, height }) => {
-      const base = state.theme === 'dark' ? '255,255,255' : '0,0,0';
-      const barWidth = width / bars.length;
-
-      ctx.clearRect(0, 0, width, height);
-
-      bars.forEach((bar, i) => {
-        bar.phase += bar.speed;
-        const h = bar.h * (0.4 + 0.6 * Math.sin(bar.phase));
-        const grad = ctx.createLinearGradient(0, height - h, 0, height);
-        grad.addColorStop(0, `rgba(${base},.3)`);
-        grad.addColorStop(1, `rgba(${base},0)`);
-
-        ctx.fillStyle = grad;
-        ctx.beginPath();
-
-        if (ctx.roundRect) {
-          ctx.roundRect(i * barWidth + 1, height - h, barWidth - 2, h, 3);
-        } else {
-          ctx.rect(i * barWidth + 1, height - h, barWidth - 2, h);
-        }
-
-        ctx.fill();
-      });
-    });
-  })();
-
-  /* =========================================
-     GLOBAL NOTE RAIN CANVAS
-  ========================================= */
-  (() => {
-    const canvas = $('#musicCanvas');
-    if (!canvas || state.reducedMotion) return;
-
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-
-    let width = 0;
-    let height = 0;
-
-    const symbols = ['♩', '♪', '♫', '♬', '𝄞', '𝄢'];
-    const noteCount = state.isMobile ? 10 : 20;
-
-    const notes = Array.from({ length: noteCount }, () => ({
-      x: Math.random() * window.innerWidth,
-      y: Math.random() * window.innerHeight,
-      sym: symbols[Math.floor(Math.random() * symbols.length)],
-      size: 10 + Math.random() * 14,
-      speed: 0.2 + Math.random() * 0.45,
-      drift: (Math.random() - 0.5) * 0.28,
-      opacity: 0.04 + Math.random() * 0.065,
-      rot: Math.random() * Math.PI * 2,
-      rotSpeed: (Math.random() - 0.5) * 0.014
-    }));
-
-    const resize = () => {
-      width = canvas.width = window.innerWidth;
-      height = canvas.height = window.innerHeight;
-    };
-
-    const draw = () => {
-      const c = state.theme === 'dark' ? 255 : 0;
-      ctx.clearRect(0, 0, width, height);
-
-      notes.forEach(note => {
-        note.y -= note.speed;
-        note.x += note.drift;
-        note.rot += note.rotSpeed;
-
-        if (note.y < -30) {
-          note.y = height + 20;
-          note.x = Math.random() * width;
-        }
-
-        if (note.x < -40) note.x = width + 20;
-        if (note.x > width + 40) note.x = -20;
-
-        ctx.save();
-        ctx.globalAlpha = note.opacity;
-        ctx.fillStyle = `rgb(${c},${c},${c})`;
-        ctx.font = `${note.size}px serif`;
-        ctx.textAlign = 'center';
-        ctx.translate(note.x, note.y);
-        ctx.rotate(note.rot);
-        ctx.fillText(note.sym, 0, 0);
-        ctx.restore();
-      });
-    };
-
-    resize();
-    window.addEventListener('resize', resize, { passive: true });
-    addRAFTask(draw);
-  })();
-
-  /* =========================================
-     DOM PARTICLES
-  ========================================= */
-  (() => {
-    const particles = $('#particles');
-    if (!particles || state.reducedMotion || state.isMobile) return;
-
-    const symbols = ['♩', '♪', '♫', '♬'];
-
-    for (let i = 0; i < 12; i++) {
-      const p = doc.createElement('span');
-      p.className = 'particle';
-      p.textContent = symbols[i % symbols.length];
-      p.style.left = `${Math.random() * 100}%`;
-      p.style.animationDuration = `${12 + Math.random() * 16}s`;
-      p.style.animationDelay = `${-Math.random() * 22}s`;
-      p.style.fontSize = `${9 + Math.random() * 10}px`;
-      p.style.opacity = `${(0.05 + Math.random() * 0.07).toFixed(3)}`;
-      particles.appendChild(p);
-    }
-  })();
-
-  /* =========================================
-     SPARKS
-  ========================================= */
-  function spawnSparks(x, y, count = 8) {
-    if (state.reducedMotion) return;
-
-    const symbols = ['♪', '♫', '♬', '♩'];
-
-    for (let i = 0; i < count; i++) {
-      const el = doc.createElement('span');
-      const angle = (i / count) * Math.PI * 2;
-      const distance = 50 + Math.random() * 60;
-
-      el.className = 'note-spark';
-      el.textContent = symbols[i % symbols.length];
-      el.style.cssText = `
-        position: fixed;
-        left: ${x}px;
-        top: ${y}px;
-        --sx: ${(Math.cos(angle) * distance).toFixed(1)}px;
-        --sy: ${(Math.sin(angle) * distance).toFixed(1)}px;
-        font-size: ${14 + Math.random() * 10}px;
-        animation-duration: ${(0.6 + Math.random() * 0.4).toFixed(2)}s;
-        pointer-events: none;
-        z-index: 9999;
-        color: var(--text);
-      `;
-
-      body.appendChild(el);
-      el.addEventListener('animationend', () => el.remove(), { once: true });
-    }
+(function () {
+  'use strict';
+
+  /* ---------- Piano (Web Audio) ---------- */
+  var ctx = null;
+  var SEMI = { C: 0, 'C#': 1, D: 2, 'D#': 3, E: 4, F: 5, 'F#': 6, G: 7, 'G#': 8, A: 9, 'A#': 10, B: 11 };
+
+  function freq(note) {
+    var m = /^([A-G]#?)(\d)$/.exec(note);
+    var n = SEMI[m[1]] + (parseInt(m[2], 10) - 4) * 12 - 9; // semitones from A4
+    return 440 * Math.pow(2, n / 12);
   }
 
-  function spawnSparksFromElement(el, count = 8) {
-    const rect = el.getBoundingClientRect();
-    spawnSparks(rect.left + rect.width / 2, rect.top + rect.height / 2, count);
+  function play(note) {
+    try {
+      var AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) return;
+      if (!ctx) ctx = new AC();
+      if (ctx.state === 'suspended') ctx.resume();
+      var t = ctx.currentTime, f = freq(note);
+      var master = ctx.createGain();
+      master.gain.setValueAtTime(0.0001, t);
+      master.gain.exponentialRampToValueAtTime(0.35, t + 0.012);
+      master.gain.exponentialRampToValueAtTime(0.0001, t + 1.6);
+      master.connect(ctx.destination);
+      [[1, 1], [2, 0.35], [3, 0.12]].forEach(function (p) {
+        var o = ctx.createOscillator(), g = ctx.createGain();
+        o.type = 'triangle';
+        o.frequency.value = f * p[0];
+        g.gain.value = p[1];
+        o.connect(g); g.connect(master);
+        o.start(t); o.stop(t + 1.7);
+      });
+    } catch (e) { /* audio unavailable */ }
   }
 
-  (() => {
-    doc.addEventListener('click', (e) => {
-      spawnSparks(e.clientX, e.clientY, 5);
+  var keysEl = document.getElementById('keys');
+  var keyByNote = {}, keyByChar = {};
+  Array.prototype.forEach.call(keysEl.querySelectorAll('.key'), function (k) {
+    keyByNote[k.dataset.note] = k;
+    keyByChar[k.dataset.key] = k;
+    k.addEventListener('pointerdown', function (e) { e.preventDefault(); press(k); });
+    k.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); if (!e.repeat) press(k); }
     });
-  })();
+  });
 
-  /* =========================================
-     FEATURE CARD TILT
-  ========================================= */
-  (() => {
-    if (state.isTouch || state.reducedMotion) return;
+  function press(k) {
+    play(k.dataset.note);
+    k.classList.add('down');
+    setTimeout(function () { k.classList.remove('down'); }, 180);
+  }
 
-    $$('.fc').forEach(card => {
-      const glow = $('.fc-glow', card);
+  document.addEventListener('keydown', function (e) {
+    if (e.repeat || e.metaKey || e.ctrlKey || e.altKey) return;
+    var t = e.target;
+    if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA')) return;
+    var k = keyByChar[e.key.toLowerCase()];
+    if (k) press(k);
+  });
 
-      card.addEventListener('mousemove', (e) => {
-        const rect = card.getBoundingClientRect();
-        const x = e.clientX - rect.left;
-        const y = e.clientY - rect.top;
-        const rotX = ((y - rect.height / 2) / (rect.height / 2)) * -6;
-        const rotY = ((x - rect.width / 2) / (rect.width / 2)) * 6;
-
-        card.style.transform = `
-          perspective(900px)
-          translateY(-5px)
-          rotateX(${rotX}deg)
-          rotateY(${rotY}deg)
-          scale(1.02)
-        `;
-
-        if (glow) {
-          glow.style.opacity = '1';
-          glow.style.background = `
-            radial-gradient(
-              circle at ${(x / rect.width) * 100}% ${(y / rect.height) * 100}%,
-              color-mix(in srgb, var(--text) 9%, transparent),
-              transparent 55%
-            )
-          `;
-        }
-      });
-
-      card.addEventListener('mouseleave', () => {
-        card.style.transform = '';
-        if (glow) glow.style.opacity = '0';
-      });
+  /* feature rows play their note */
+  Array.prototype.forEach.call(document.querySelectorAll('.feature-list button'), function (b) {
+    b.addEventListener('click', function () {
+      play(b.dataset.note);
+      var k = keyByNote[b.dataset.note];
+      if (k) press(k);
+      b.classList.add('hit');
+      setTimeout(function () { b.classList.remove('hit'); }, 220);
     });
-  })();
+  });
 
-  /* =========================================
-     DOWNLOAD CARD SHINE
-  ========================================= */
-  (() => {
-    const card = $('.dl-card');
-    const shine = $('.dl-card-shine');
-    if (!card || !shine || state.isTouch) return;
+  /* ---------- Lyrics ---------- */
+  var lines = Array.prototype.slice.call(document.querySelectorAll('#lyric-lines li'));
+  var toggle = document.getElementById('lyric-toggle');
+  var cur = 0, timer = null;
+  var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  var running = !reduce;
 
-    card.addEventListener('mousemove', (e) => {
-      const rect = card.getBoundingClientRect();
-      const x = ((e.clientX - rect.left) / rect.width) * 100;
-      const y = ((e.clientY - rect.top) / rect.height) * 100;
-
-      shine.style.background = `
-        radial-gradient(
-          circle at ${x}% ${y}%,
-          color-mix(in srgb, var(--text) 7%, transparent),
-          transparent 55%
-        )
-      `;
+  function show(i) {
+    cur = i;
+    lines.forEach(function (li, n) {
+      li.classList.toggle('on', n === i);
+      if (n === i) li.firstElementChild.setAttribute('aria-current', 'true');
+      else li.firstElementChild.removeAttribute('aria-current');
     });
+  }
+  function start() { stop(); timer = setInterval(function () { show((cur + 1) % lines.length); }, 2200); }
+  function stop() { if (timer) clearInterval(timer); timer = null; }
+  function sync() {
+    toggle.textContent = running ? 'Pause lyrics' : 'Play lyrics';
+    toggle.setAttribute('aria-pressed', String(!running));
+    if (running) start(); else stop();
+  }
+  lines.forEach(function (li, n) {
+    li.firstElementChild.addEventListener('click', function () { show(n); if (running) start(); });
+  });
+  toggle.addEventListener('click', function () { running = !running; sync(); });
+  show(0); sync();
 
-    card.addEventListener('mouseleave', () => {
-      shine.style.background =
-        'linear-gradient(135deg, color-mix(in srgb, var(--text) 5%, transparent), transparent 40%)';
+  /* ---------- Colour ---------- */
+  var section = document.getElementById('colour');
+  var sw = Array.prototype.slice.call(section.querySelectorAll('.swatches button'));
+  sw.forEach(function (b) {
+    b.addEventListener('click', function () {
+      sw.forEach(function (x) { x.setAttribute('aria-checked', String(x === b)); });
+      section.style.setProperty('--album', b.dataset.c);
+      document.getElementById('mp-title').textContent = b.dataset.t;
+      document.getElementById('mp-artist').innerHTML = b.dataset.a;
     });
-  })();
-
-  /* =========================================
-     SCREENSHOT DRAG SCROLL
-  ========================================= */
-  (() => {
-    const rail = $('#scrScroll');
-    if (!rail) return;
-
-    let isDown = false;
-    let startX = 0;
-    let startScroll = 0;
-
-    rail.addEventListener('mousedown', (e) => {
-      isDown = true;
-      startX = e.pageX - rail.offsetLeft;
-      startScroll = rail.scrollLeft;
-      rail.style.userSelect = 'none';
-      rail.style.cursor = 'grabbing';
-    });
-
-    rail.addEventListener('mousemove', (e) => {
-      if (!isDown) return;
-      e.preventDefault();
-      const x = e.pageX - rail.offsetLeft;
-      const walk = (x - startX) * 1.6;
-      rail.scrollLeft = startScroll - walk;
-    });
-
-    ['mouseleave', 'mouseup'].forEach(type => {
-      rail.addEventListener(type, () => {
-        isDown = false;
-        rail.style.userSelect = '';
-        rail.style.cursor = 'grab';
-      });
-    });
-  })();
-
-  /* =========================================
-     HERO PARALLAX
-  ========================================= */
-  (() => {
-    const phones = $('.hero-phones');
-    if (!phones || state.reducedMotion || state.isMobile) return;
-
-    let ticking = false;
-
-    const update = () => {
-      if (window.scrollY < window.innerHeight) {
-        phones.style.transform = `translateY(${window.scrollY * 0.1}px)`;
-      }
-      ticking = false;
-    };
-
-    window.addEventListener('scroll', () => {
-      if (ticking) return;
-      ticking = true;
-      requestAnimationFrame(update);
-    }, { passive: true });
-  })();
-
-  /* =========================================
-     SMOOTH ANCHOR LINKS
-  ========================================= */
-  (() => {
-    $$('a[href^="#"]').forEach(link => {
-      link.addEventListener('click', (e) => {
-        const href = link.getAttribute('href');
-        const target = href ? $(href) : null;
-        if (!target) return;
-
-        e.preventDefault();
-        target.scrollIntoView({
-          behavior: 'smooth',
-          block: 'start'
-        });
-      });
-    });
-  })();
-
-  /* =========================================
-     MARQUEE TOUCH PAUSE
-  ========================================= */
-  (() => {
-    const wrap = $('.marquee-wrap');
-    const track = $('.marquee-track');
-    if (!wrap || !track) return;
-
-    wrap.addEventListener('touchstart', () => {
-      track.style.animationPlayState = 'paused';
-    }, { passive: true });
-
-    wrap.addEventListener('touchend', () => {
-      track.style.animationPlayState = 'running';
-    }, { passive: true });
-  })();
-
-  /* =========================================
-     LOAD BURST
-  ========================================= */
-  window.addEventListener('load', () => {
-    if (state.reducedMotion) return;
-    window.setTimeout(() => {
-      spawnSparks(window.innerWidth / 2, window.innerHeight / 2, 12);
-    }, 700);
   });
 })();
